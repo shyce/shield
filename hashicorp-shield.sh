@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ################################################################################
-# Title: Vault Shield
+# Title: HashiCorp Vault Shield
 # Version: v0.3.0
 # Description: This script provides functionality for encrypting and decrypting
 #              files using AES encryption and Vault key management system.
