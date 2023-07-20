@@ -1,0 +1,6 @@
+.env*
+**/*.crt
+**/*.key
+**/*.cer
+**/*.pem
+app/portal/application/config/config.php
