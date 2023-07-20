@@ -52,6 +52,12 @@ func main() {
 func generatePreCommitHook() {
 	preCommitHookPath := ".git/hooks/pre-commit"
 
+	// Remove the existing pre-commit hook file if it exists
+	if err := os.Remove(preCommitHookPath); err != nil && !os.IsNotExist(err) {
+		fmt.Println("Error removing existing pre-commit hook:", err)
+		os.Exit(1)
+	}
+
 	preCommitHookScript := `#!/bin/bash
 set -e
 
@@ -65,28 +71,33 @@ while IFS= read -r line; do
   OMIT_PATTERNS+=("$line")
 done < .shieldignore
 
-files_encrypted=0
+files_to_encrypt=()
 for FILE_PATH in $(git diff --cached --name-only); do
-  for glob in "${GLOB_PATTERNS[@]}"; do
-    if [[ $FILE_PATH == $glob ]]; then
-      for omit in "${OMIT_PATTERNS[@]}"; do
-        if [[ $FILE_PATH == $omit ]]; then
-          continue 2
-        fi
-      done
+  if [[ -e $FILE_PATH ]]; then
+    for glob in "${GLOB_PATTERNS[@]}"; do
+      if [[ $FILE_PATH == $glob ]]; then
+        for omit in "${OMIT_PATTERNS[@]}"; do
+          if [[ $FILE_PATH == $omit ]]; then
+            continue 2
+          fi
+        done
 
-      if ! file "$FILE_PATH" | grep -q 'data'; then
-        echo "ERROR: The file $FILE_PATH is not encrypted. Encrypting it now..."
-        ./shield -e "$FILE_PATH"
-        git add "$FILE_PATH"
-        files_encrypted=1
+        if ! file "$FILE_PATH" | grep -q 'data'; then
+          echo "ERROR: The file $FILE_PATH is not encrypted."
+          files_to_encrypt+=("$FILE_PATH")
+        fi
       fi
-    fi
-  done
+    done
+  fi
 done
 
-if [ "$files_encrypted" -eq 1 ]; then
-  echo "Some files were not encrypted. They have been encrypted and added to the commit. Please re-run the commit command."
+if [ ${#files_to_encrypt[@]} -ne 0 ]; then
+  echo "Some files were not encrypted. Running encryption now..."
+  ./shield -e
+  for file in "${files_to_encrypt[@]}"; do
+    git add "$file"
+  done
+  echo "Files have been encrypted and added to the commit. Please re-run the commit command."
   exit 1
 fi
 
@@ -99,6 +110,7 @@ exit 0
 	}
 	fmt.Println("Git pre-commit hook successfully generated!")
 }
+
 
 func readPatternsFromFile(file string) ([]string, error) {
 	f, err := os.Open(file)
