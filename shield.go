@@ -63,10 +63,9 @@ func main() {
 	case "--decrypt", "-d":
 		colorPrint(Yellow, "Decrypting files...")
 		decryptFiles()
-	case "--generate-hooks", "-g":
+	case "--generate-hook", "-g":
 		colorPrint(Magenta, "Generating Git pre-commit hook...")
 		generatePreCommitHook()
-		generatePreCheckoutHook()
 	case "--version", "-v", "version":
 		colorPrint(Cyan, "Shield Encryption:")
 		colorPrint(Blue, fmt.Sprintf("Version: %s", Version))
@@ -78,11 +77,11 @@ func main() {
 		colorPrint(Reset, "Available options:")
 		colorPrint(Green, "--encrypt, -e			Encrypt files")
 		colorPrint(Yellow, "--decrypt, -d			Decrypt files")
-		colorPrint(Magenta, "--generate-hooks, -g		Generate Git pre-commit hook")
+		colorPrint(Magenta, "--generate-hook, -g		Generate Git pre-commit hook")
 		colorPrint(Blue, "--version, -v			Print version information")
 		colorPrint(Cyan, "--help, -h			Show this help message and exit")
 	default:
-		colorPrint(Red, "Invalid argument. Please use either '--encrypt', '-e', '--decrypt', '-d', '--generate-hooks', '-g', '--version', '-v', or '--help', '-h'.")
+		colorPrint(Red, "Invalid argument. Please use either '--encrypt', '-e', '--decrypt', '-d', '--generate-hook', '-g', '--version', '-v', or '--help', '-h'.")
 		os.Exit(1)
 	}
 }
@@ -148,65 +147,6 @@ exit 0
 			os.Exit(1)
 	}
 	colorPrint(Green, "Git pre-commit hook successfully generated!")
-}
-
-func generatePreCheckoutHook() {
-	preCheckoutHookPath := ".git/hooks/pre-checkout"
-
-	// Remove the existing pre-checkout hook file if it exists
-    if err := os.Remove(preCheckoutHookPath); err != nil && !os.IsNotExist(err) {
-			colorPrint(Red, fmt.Sprintf("Error removing existing pre-checkout hook: %s", err))
-			os.Exit(1)
-	}
-
-	preCheckoutHookScript := `#!/bin/bash
-set -e
-shopt -s globstar
-
-GLOB_PATTERNS=()
-while IFS= read -r line; do
-  GLOB_PATTERNS+=("$line")
-done < .shield
-
-OMIT_PATTERNS=()
-while IFS= read -r line; do
-  OMIT_PATTERNS+=("$line")
-done < .shieldignore
-
-files_to_encrypt=()
-for FILE_PATH in **; do
-  if [[ -e $FILE_PATH ]]; then
-    for glob in "${GLOB_PATTERNS[@]}"; do
-      if [[ $FILE_PATH == $glob ]]; then
-        for omit in "${OMIT_PATTERNS[@]}"; do
-          if [[ $FILE_PATH == $omit ]]; then
-            continue 2
-          fi
-        done
-
-        if ! file "$FILE_PATH" | grep -q 'data'; then
-          files_to_encrypt+=("$FILE_PATH")
-        fi
-      fi
-    done
-  fi
-done
-
-if [ ${#files_to_encrypt[@]} -ne 0 ]; then
-  echo "Some files were not encrypted. Running encryption now..."
-  ./shield -e
-  echo "Files have been encrypted."
-  exit 1
-fi
-
-exit 0
-`
-	err := os.WriteFile(preCheckoutHookPath, []byte(preCheckoutHookScript), 0755)
-	if err != nil {
-			colorPrint(Red, fmt.Sprintf("Error writing pre-checkout hook: %s", err))
-			os.Exit(1)
-	}
-	colorPrint(Green, "Git pre-checkout hook successfully generated!")
 }
 
 func readPatternsFromFile(file string) ([]string, error) {
