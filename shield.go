@@ -4,24 +4,41 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"os/user"
-	"sync"
-	"runtime"
 	"path/filepath"
+	"runtime"
+	"sync"
 
 	"github.com/bmatcuk/doublestar"
 )
-var (
-	vaultPasswordFile string
-)
 
 const (
-	EncryptionTag      = "SHIELD[1.0]:"
-	EncryptionTagBytes = len(EncryptionTag)
+	Black   = "\u001b[30m"
+	Red     = "\u001b[31m"
+	Green   = "\u001b[32m"
+	Yellow  = "\u001b[33m"
+	Blue    = "\u001b[34m"
+	Magenta = "\u001b[35m"
+	Cyan    = "\u001b[36m"
+	White   = "\u001b[37m"
+	Reset   = "\u001b[0m"
 )
+
+var (
+	Author             string
+	Encryption         string
+	EncryptionTag      string
+	EncryptionTagBytes int
+	Name               string
+	Version            string
+	VaultPasswordFile  string
+)
+
+func colorPrint(color string, text string) {
+	fmt.Println(string(color), text, string(Reset))
+}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -29,11 +46,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	EncryptionTag = "SHIELD[" + Encryption + "]:"
+	EncryptionTagBytes = len(EncryptionTag)
+
 	usr, err := user.Current()
 	if err != nil {
 		fmt.Printf("cannot get current user: %v", err)
 	}
-	vaultPasswordFile = filepath.Join(usr.HomeDir, ".ssh", "vault")
+	VaultPasswordFile = filepath.Join(usr.HomeDir, ".ssh", "vault")
 
 	switch os.Args[1] {
 	case "--encrypt", "-e":
@@ -45,6 +65,12 @@ func main() {
 	case "--generate-precommit", "-g":
 		fmt.Println("Generating Git pre-commit hook...")
 		generatePreCommitHook()
+	case "--version", "-v", "version":
+		colorPrint(Cyan, "Shield Encryption:")
+		colorPrint(Green, fmt.Sprintf("Name: %s", Name))
+		colorPrint(Green, fmt.Sprintf("Version: %s", Version))
+		colorPrint(Green, fmt.Sprintf("Author: %s", Author))
+		colorPrint(Green, fmt.Sprintf("Encryption Version: %s", Encryption))
 	default:
 		fmt.Println("Invalid argument. Please use either '--encrypt', '-e', '--decrypt', or '-d'.")
 		os.Exit(1)
@@ -106,14 +132,13 @@ fi
 
 exit 0
 `
-	err := ioutil.WriteFile(preCommitHookPath, []byte(preCommitHookScript), 0755)
+	err := os.WriteFile(preCommitHookPath, []byte(preCommitHookScript), 0755)
 	if err != nil {
 		fmt.Println("Error writing pre-commit hook:", err)
 		os.Exit(1)
 	}
 	fmt.Println("Git pre-commit hook successfully generated!")
 }
-
 
 func readPatternsFromFile(file string) ([]string, error) {
 	f, err := os.Open(file)
@@ -134,7 +159,6 @@ func readPatternsFromFile(file string) ([]string, error) {
 
 	return patterns, nil
 }
-
 
 func processFiles(files []string, actionFunc func(string), wg *sync.WaitGroup, semaphore chan struct{}) {
 	for _, path := range files {
@@ -173,7 +197,7 @@ func encryptFiles() {
 			fmt.Printf("Error while matching glob pattern: %s\n", err)
 			os.Exit(1)
 		}
-	
+
 		for _, filePath := range matchingFiles {
 			isOmitted := false
 			for _, omitPattern := range shieldIgnorePatterns {
@@ -186,7 +210,7 @@ func encryptFiles() {
 			if isOmitted {
 				continue
 			}
-	
+
 			encrypted, _ := isFileEncrypted(filePath)
 			if !encrypted {
 				filesToEncrypt = append(filesToEncrypt, filePath)
@@ -221,7 +245,7 @@ func decryptFiles() {
 			fmt.Printf("Error while matching glob pattern: %s\n", err)
 			os.Exit(1)
 		}
-	
+
 		for _, filePath := range matchingFiles {
 			isOmitted := false
 			for _, omitPattern := range shieldIgnorePatterns {
@@ -234,7 +258,7 @@ func decryptFiles() {
 			if isOmitted {
 				continue
 			}
-	
+
 			encrypted, _ := isFileEncrypted(filePath)
 			if encrypted {
 				filesToDecrypt = append(filesToDecrypt, filePath)
@@ -251,7 +275,7 @@ func decryptFiles() {
 func encryptFile(path string) {
 	fmt.Printf("Attempting to encrypt file: %s\n", path)
 
-	cmd := exec.Command("openssl", "enc", "-aes-256-cbc", "-nosalt", "-pass", fmt.Sprintf("file:%s", vaultPasswordFile), "-in", path, "-out", path+".enc")
+	cmd := exec.Command("openssl", "enc", "-aes-256-cbc", "-nosalt", "-pass", fmt.Sprintf("file:%s", VaultPasswordFile), "-in", path, "-out", path+".enc")
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	err := cmd.Run()
@@ -277,7 +301,7 @@ func decryptFile(path string) {
 	if err != nil {
 		fmt.Printf("Failed to remove encryption tag: %s\n", err)
 	} else {
-		cmd := exec.Command("openssl", "enc", "-d", "-aes-256-cbc", "-nosalt", "-pass", fmt.Sprintf("file:%s", vaultPasswordFile), "-in", path, "-out", path+".dec")
+		cmd := exec.Command("openssl", "enc", "-d", "-aes-256-cbc", "-nosalt", "-pass", fmt.Sprintf("file:%s", VaultPasswordFile), "-in", path, "-out", path+".dec")
 		var out bytes.Buffer
 		cmd.Stdout = &out
 		err = cmd.Run()
@@ -293,29 +317,29 @@ func decryptFile(path string) {
 }
 
 func addEncryptionTag(path string) error {
-	content, err := ioutil.ReadFile(path)
+	content, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
 
 	content = append([]byte(EncryptionTag), content...)
 
-	return ioutil.WriteFile(path, content, 0666)
+	return os.WriteFile(path, content, 0666)
 }
 
 func removeEncryptionTag(path string) error {
-	content, err := ioutil.ReadFile(path)
+	content, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
 
 	content = content[EncryptionTagBytes:]
 
-	return ioutil.WriteFile(path, content, 0666)
+	return os.WriteFile(path, content, 0666)
 }
 
 func isFileEncrypted(path string) (bool, error) {
-	content, err := ioutil.ReadFile(path)
+	content, err := os.ReadFile(path)
 	if err != nil {
 		return false, err
 	}
