@@ -104,10 +104,9 @@ if ! [[ "$new_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
 fi
 
 confirm "Bump version number from $current_version to $new_version?"
-new_tag="$new_version"
 bump_files "$current_version" "$new_version"
 
-confirm "Publish $new_tag?"
+confirm "Publish $new_version?"
 
 echo "Syncing remote tags..."
 git config fetch.prune true
@@ -118,8 +117,10 @@ echo "Committing changed files..."
 git add --all
 git commit -m "Bumped version to $new_version"
 
-echo "Adding new version tag: $new_tag..."
-git tag "$new_tag"
+echo "Adding new version tag: $new_version..."
+git tag "$new_version"
+
+sleep 2
 
 echo "Generating changelog..."
 git fetch origin --tags
@@ -131,6 +132,6 @@ git commit -m "Updated changelog for $new_version"
 
 current_branch=$(git symbolic-ref --short HEAD)
 
-echo "Pushing branch $current_branch and tag $new_tag upstream..."
+echo "Pushing branch $current_branch and tag $new_version upstream..."
 git push origin $current_branch
-git push origin "$new_tag"
+git push origin "$new_version"
