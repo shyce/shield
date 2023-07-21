@@ -108,6 +108,8 @@ bump_files "$current_version" "$new_version"
 
 confirm "Publish $new_version?"
 
+source $PWD/build.sh
+
 echo "Syncing remote tags..."
 git config fetch.prune true
 git config fetch.pruneTags true
