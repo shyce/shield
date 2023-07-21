@@ -114,10 +114,6 @@ git config fetch.prune true
 git config fetch.pruneTags true
 git fetch origin
 
-echo "Adding new version tag: $new_tag..."
-git tag "$new_tag"
-git push origin "$new_tag"
-
 echo "Generating changelog..."
 git fetch origin --tags
 git-chglog $new_version > CHANGELOG.md
@@ -125,6 +121,10 @@ git-chglog $new_version > CHANGELOG.md
 echo "Committing changed files..."
 git add --all
 git commit -m "Bumped version to $new_version"
+
+echo "Adding new version tag: $new_tag..."
+git tag "$new_tag"
+git push origin "$new_tag"
 
 current_branch=$(git symbolic-ref --short HEAD)
 
