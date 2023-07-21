@@ -131,3 +131,9 @@ current_branch=$(git symbolic-ref --short HEAD)
 
 echo "Pushing branch $current_branch and tag $new_version upstream..."
 git push origin $current_branch --tags
+
+echo "Force-updating the version tag: $new_version..."
+git tag -f "$new_version"
+
+echo "Force-pushing the version tag: $new_version..."
+git push origin -f "$new_version"
