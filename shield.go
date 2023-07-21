@@ -3,7 +3,9 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"flag"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"os/user"
@@ -11,7 +13,7 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/bmatcuk/doublestar"
+	"github.com/bmatcuk/doublestar/v4"
 )
 
 const (
@@ -36,58 +38,83 @@ var (
 	VaultPasswordFile  string
 )
 
+var (
+	directory      string
+	encrypt, decrypt, generateHook, version bool
+)
+
 func colorPrint(color string, text string) {
 	fmt.Println(string(color), text, string(Reset))
 }
 
-func main() {
-	if len(os.Args) < 2 {
-		colorPrint(Red, "Insufficient arguments. Please use either '--encrypt', '-e', '--decrypt', '-d', '--generate-hooks', '-g', '--version', '-v', or '--help', '-h'.")
-		os.Exit(1)
+func init() {
+	flag.StringVar(&directory, "v", ".", "directory to operate on")
+	flag.BoolVar(&encrypt, "e", false, "Encrypt files")
+	flag.BoolVar(&decrypt, "d", false, "Decrypt files")
+	flag.BoolVar(&generateHook, "g", false, "Generate Git pre-commit hook")
+	flag.BoolVar(&version, "version", false, "Print version information")
+	flag.Usage = func() {
+		fmt.Println("Usage: shield [OPTION]...")
+		fmt.Println("Available options:")
+		flag.PrintDefaults()
 	}
+}
+
+func main() {
+	flag.Parse()
+
+	if directory != "." {
+		colorPrint(Green, fmt.Sprintf("Operating on directory: %s", directory))
+	}
+
+	// Resolve the directory to an absolute path
+	absDirectory, err := filepath.Abs(directory)
+	if err != nil {
+		log.Fatalf("Failed to resolve directory to an absolute path: %v\n", err)
+	}
+	directory = absDirectory
 
 	EncryptionTag = "SHIELD[" + Encryption + "]:"
 	EncryptionTagBytes = len(EncryptionTag)
-	usr, err := user.Current()
 
-	if err != nil {
-		colorPrint(Red, fmt.Sprintf("Cannot get current user: %v", err))
+	home := os.Getenv("HOME")
+	if home == "" {
+		usr, err := user.Current()
+		if err != nil {
+			colorPrint(Red, fmt.Sprintf("Cannot get current user: %v", err))
+		}
+		home = usr.HomeDir
 	}
 
-	VaultPasswordFile = filepath.Join(usr.HomeDir, ".ssh", "vault")
+	VaultPasswordFile = filepath.Join(home, ".ssh", "vault")
 
-	switch os.Args[1] {
-	case "--encrypt", "-e":
+	if encrypt {
 		colorPrint(Green, "Encrypting files...")
 		encryptFiles()
-	case "--decrypt", "-d":
+	}
+	if decrypt {
 		colorPrint(Yellow, "Decrypting files...")
 		decryptFiles()
-	case "--generate-hook", "-g":
+	}
+	if generateHook {
 		colorPrint(Magenta, "Generating Git pre-commit hook...")
 		generatePreCommitHook()
-	case "--version", "-v", "version":
+	}
+	if version {
 		colorPrint(Cyan, "Shield Encryption:")
 		colorPrint(Blue, fmt.Sprintf("Version: %s", Version))
 		colorPrint(Magenta, fmt.Sprintf("Encryption Version: %s", Encryption))
 		colorPrint(Yellow, fmt.Sprintf("Author: %s", Author))
-	case "--help", "-h":
-		colorPrint(Cyan, "Shield Help:")
-		colorPrint(Reset, "Usage: shield [OPTION]...")
-		colorPrint(Reset, "Available options:")
-		colorPrint(Green, "--encrypt, -e			Encrypt files")
-		colorPrint(Yellow, "--decrypt, -d			Decrypt files")
-		colorPrint(Magenta, "--generate-hook, -g		Generate Git pre-commit hook")
-		colorPrint(Blue, "--version, -v			Print version information")
-		colorPrint(Cyan, "--help, -h			Show this help message and exit")
-	default:
-		colorPrint(Red, "Invalid argument. Please use either '--encrypt', '-e', '--decrypt', '-d', '--generate-hook', '-g', '--version', '-v', or '--help', '-h'.")
+		os.Exit(0)
+	}
+	if !encrypt && !decrypt && !generateHook && !version {
+		flag.PrintDefaults()
 		os.Exit(1)
 	}
 }
 
 func generatePreCommitHook() {
-	preCommitHookPath := ".git/hooks/pre-commit"
+	preCommitHookPath := filepath.Join(directory, ".git/hooks/pre-commit")
 
 	// Remove the existing pre-commit hook file if it exists
     if err := os.Remove(preCommitHookPath); err != nil && !os.IsNotExist(err) {
@@ -150,6 +177,7 @@ exit 0
 }
 
 func readPatternsFromFile(file string) ([]string, error) {
+	file = filepath.Join(directory, file)
 	f, err := os.Open(file)
 	if err != nil {
 			colorPrint(Red, fmt.Sprintf("Error opening file: %s", err))
@@ -200,10 +228,11 @@ func encryptFiles() {
 			os.Exit(1)
 	}
 
+	fsys := os.DirFS(directory)
 	var filesToEncrypt []string
 	for _, pattern := range shieldPatterns {
 			colorPrint(Green, fmt.Sprintf("Looking for files matching pattern: %s", pattern))
-			matchingFiles, err := doublestar.Glob(pattern)
+			matchingFiles, err := doublestar.Glob(fsys, pattern)
 			if err != nil {
 					colorPrint(Red, fmt.Sprintf("Error while matching glob pattern: %s", err))
 					os.Exit(1)
@@ -248,10 +277,11 @@ func decryptFiles() {
 			os.Exit(1)
 	}
 
+	fsys := os.DirFS(directory)
 	var filesToDecrypt []string
 	for _, pattern := range shieldPatterns {
 			colorPrint(Green, fmt.Sprintf("Looking for files matching pattern: %s", pattern))
-			matchingFiles, err := doublestar.Glob(pattern)
+			matchingFiles, err := doublestar.Glob(fsys, pattern)
 			if err != nil {
 					colorPrint(Red, fmt.Sprintf("Error while matching glob pattern: %s", err))
 					os.Exit(1)
@@ -284,6 +314,7 @@ func decryptFiles() {
 }
 
 func encryptFile(path string) {
+	path = filepath.Join(directory, path)
 	colorPrint(Yellow, fmt.Sprintf("Attempting to encrypt file: %s", path))
 
 	cmd := exec.Command("openssl", "enc", "-aes-256-cbc", "-nosalt", "-pass", fmt.Sprintf("file:%s", VaultPasswordFile), "-in", path, "-out", path+".enc")
@@ -312,6 +343,7 @@ func encryptFile(path string) {
 }
 
 func decryptFile(path string) {
+	path = filepath.Join(directory, path)
 	colorPrint(Yellow, fmt.Sprintf("Attempting to decrypt file: %s", path))
 
 	err := removeEncryptionTag(path) // remove tag before decryption
@@ -362,6 +394,7 @@ func removeEncryptionTag(path string) error {
 }
 
 func isFileEncrypted(path string) (bool, error) {
+	path = filepath.Join(directory, path)
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return false, err

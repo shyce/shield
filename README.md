@@ -38,6 +38,26 @@ Under the Apache-2.0 License, `Shield` is a utility for encrypting and decryptin
   
 - To **generate a git pre-commit hook** that checks for unencrypted files (from the `.shield` patterns) and encrypts them, run the command: `./shield -g`. After running this command, every time you try to commit, the hook will check for unencrypted files and encrypt them.
 
+## Running Shield with Docker
+
+Shield can be run inside a Docker container without installing anything else on your system. The included `docker.sh` script will handle building and running the Docker container for you.
+
+Before running the `docker.sh` script, ensure you have [Docker](https://www.docker.com/get-started) installed and running on your system.
+
+1. Make sure the `docker.sh` script is executable. If it's not, you can make it executable by running `chmod +x docker.sh`.
+
+2. Run the `docker.sh` script:
+
+    ```bash
+    ./docker.sh
+    ```
+
+    This script will ask you to enter the directory you want to mount inside the Docker container. This should be the directory containing the files you want to encrypt or decrypt with Shield.
+
+    The script will automatically build the Shield Docker image and then run it, mounting the specified directory and your `vault` file inside the Docker container. This means you can run Shield inside the Docker container just like you would if it was installed directly on your system.
+
+Note: This Docker container runs as the current user on your system and mounts your `vault` file and the specified directory, so it will be able to read and write files in the mounted directory and read your `vault` file.
+
 ## Developer Guide
 
 ### Developer Requirements
