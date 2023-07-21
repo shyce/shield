@@ -11,6 +11,8 @@ import (
 	"sync"
 	"runtime"
 	"path/filepath"
+
+	"github.com/bmatcuk/doublestar"
 )
 var (
 	vaultPasswordFile string
@@ -60,6 +62,7 @@ func generatePreCommitHook() {
 
 	preCommitHookScript := `#!/bin/bash
 set -e
+shopt -s globstar
 
 GLOB_PATTERNS=()
 while IFS= read -r line; do
@@ -165,38 +168,30 @@ func encryptFiles() {
 	var filesToEncrypt []string
 	for _, pattern := range shieldPatterns {
 		fmt.Printf("Looking for files matching pattern: %s\n", pattern)
-		filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				fmt.Printf("Error while walking file path: %s\n", err)
-				return err
-			}
-
+		matchingFiles, err := doublestar.Glob(pattern)
+		if err != nil {
+			fmt.Printf("Error while matching glob pattern: %s\n", err)
+			os.Exit(1)
+		}
+	
+		for _, filePath := range matchingFiles {
+			isOmitted := false
 			for _, omitPattern := range shieldIgnorePatterns {
-				matched, err := filepath.Match(omitPattern, path)
-				if err != nil {
-					fmt.Printf("Error while matching omit pattern: %s\n", err)
-					return err
-				}
-				if matched {
-					fmt.Printf("File: %s matches the omit pattern. Skipping it.\n", path)
-					return nil
+				matches, _ := doublestar.Match(omitPattern, filePath)
+				if matches {
+					isOmitted = true
+					break
 				}
 			}
-
-			matched, err := filepath.Match(pattern, path)
-			if err != nil {
-				fmt.Printf("Error while matching glob pattern: %s\n", err)
-				return err
+			if isOmitted {
+				continue
 			}
-			if matched && info.Mode().IsRegular() {
-				fmt.Printf("Found a file matching the pattern: %s\n", path)
-				encrypted, _ := isFileEncrypted(path)
-				if !encrypted {
-					filesToEncrypt = append(filesToEncrypt, path)
-				}
+	
+			encrypted, _ := isFileEncrypted(filePath)
+			if !encrypted {
+				filesToEncrypt = append(filesToEncrypt, filePath)
 			}
-			return nil
-		})
+		}
 	}
 
 	var wg sync.WaitGroup
@@ -221,38 +216,30 @@ func decryptFiles() {
 	var filesToDecrypt []string
 	for _, pattern := range shieldPatterns {
 		fmt.Printf("Looking for files matching pattern: %s\n", pattern)
-		filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				fmt.Printf("Error while walking file path: %s\n", err)
-				return err
-			}
-
+		matchingFiles, err := doublestar.Glob(pattern)
+		if err != nil {
+			fmt.Printf("Error while matching glob pattern: %s\n", err)
+			os.Exit(1)
+		}
+	
+		for _, filePath := range matchingFiles {
+			isOmitted := false
 			for _, omitPattern := range shieldIgnorePatterns {
-				matched, err := filepath.Match(omitPattern, path)
-				if err != nil {
-					fmt.Printf("Error while matching omit pattern: %s\n", err)
-					return err
-				}
-				if matched {
-					fmt.Printf("File: %s matches the omit pattern. Skipping it.\n", path)
-					return nil
+				matches, _ := doublestar.Match(omitPattern, filePath)
+				if matches {
+					isOmitted = true
+					break
 				}
 			}
-
-			matched, err := filepath.Match(pattern, path)
-			if err != nil {
-				fmt.Printf("Error while matching glob pattern: %s\n", err)
-				return err
+			if isOmitted {
+				continue
 			}
-			if matched && info.Mode().IsRegular() {
-				fmt.Printf("Found a file matching the pattern: %s\n", path)
-				encrypted, _ := isFileEncrypted(path)
-				if encrypted {
-					filesToDecrypt = append(filesToDecrypt, path)
-				}
+	
+			encrypted, _ := isFileEncrypted(filePath)
+			if encrypted {
+				filesToDecrypt = append(filesToDecrypt, filePath)
 			}
-			return nil
-		})
+		}
 	}
 
 	var wg sync.WaitGroup
