@@ -2,9 +2,59 @@
 
 Under the Apache-2.0 License, `Shield` is a utility for encrypting and decrypting files in your project. It uses AES-256 encryption via the `openssl` command line tool.
 
+---
+
+## Downloading and Installing Shield
+
+Shield can be easily installed on macOS, Linux, and Windows. Choose the script appropriate for your operating system and execute it in your terminal to download and install the latest version of Shield:
+
+### macOS/Linux:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/shyce/shield/main/install.sh | bash
+```
+
+Optionally, you can specify a particular version to install like this:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/shyce/shield/main/install.sh | bash -s -- -v <version>
+```
+Replace `<version>` with the version number that you want to install.
+
+### Windows:
+
+On Windows, open a PowerShell window and run the following command:
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/shyce/shield/main/install.ps1 | iex
+```
+
+Optionally, you can specify a particular version to install like this:
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/shyce/shield/main/install.ps1 | iex -v <version>
+```
+Replace `<version>` with the version number that you want to install.
+
+## Self-installation
+
+Shield provides a self-installation feature for users who already have the binary. This functionality can be triggered using the `--install` flag. When the `--install` flag is passed, Shield will attempt to copy its binary to a system-wide location, making it available from any directory in your terminal. This can be especially helpful when working with multiple projects that all utilize Shield. 
+
+To use this feature, navigate to the directory where the Shield binary is located and run the following command:
+
+```bash
+./shield --install
+```
+
+The binary will then be copied to the appropriate system-wide location, depending on your operating system.
+
+After successful installation, you should be able to run Shield from any directory by just typing `shield` followed by the desired flags. 
+
+Please ensure you have the necessary permissions to write to the target directory. On Unix-based systems, you may need to prepend the command with `sudo` if you encounter permission issues.
+
 ## Setup
 
-1. Compile the `shield` utility and place the resulting binary at the root of your project.
+1. Create a `~/.ssh/vault` file with a secure password and `chmod 600 ~/.ssh/vault`. This is used to encrypt and decrypt files in the repository and should be shared between developers of your project.
 
 2. Create a `.shield` file at the root of your project. This file will list all the glob patterns for files you want to encrypt. Each pattern should be on a new line. For example:
     ```
@@ -28,15 +78,15 @@ Under the Apache-2.0 License, `Shield` is a utility for encrypting and decryptin
     - The `temp.secret` file in the root directory.
     - Any files in any `vendors` directory at any level.
 
-4. Make sure to have your encryption password stored in a `vault` file located in your home directory under `.ssh`. This is used to encrypt and decrypt files in the repository and should be shared between developers of your project.
+4. Generate a pre-commit hook in your project with `shield -g`
 
 ## Usage
 
-- To **encrypt files**, run the command: `./shield -e`. This will encrypt all files that match the patterns in your `.shield` file and do not match any patterns in your `.shieldignore` file.
+- To **encrypt files**, run the command: `shield -e`. This will encrypt all files that match the patterns in your `.shield` file and do not match any patterns in your `.shieldignore` file.
   
-- To **decrypt files**, run the command: `./shield -d`. This will decrypt all encrypted files that match the patterns in your `.shield` file and do not match any patterns in your `.shieldignore` file.
+- To **decrypt files**, run the command: `shield -d`. This will decrypt all encrypted files that match the patterns in your `.shield` file and do not match any patterns in your `.shieldignore` file.
   
-- To **generate a git pre-commit hook** that checks for unencrypted files (from the `.shield` patterns) and encrypts them, run the command: `./shield -g`. After running this command, every time you try to commit, the hook will check for unencrypted files and encrypt them.
+- To **generate a git pre-commit hook** that checks for unencrypted files (from the `.shield` patterns) and encrypts them, run the command: `shield -g`. After running this command, every time you try to commit, the hook will check for unencrypted files and encrypt them.
 
 ## Running Shield with Docker
 

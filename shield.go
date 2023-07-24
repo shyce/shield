@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sync"
 
@@ -38,10 +39,62 @@ var (
 	VaultPasswordFile  string
 )
 
+const (
+    ShieldLinuxPath   = "/usr/local/bin/shield"
+    ShieldWindowsPath = `%USERPROFILE%\AppData\Local\Programs\Shield\shield.exe`
+    ShieldMacPath     = "/usr/local/bin/shield"
+)
+
 var (
 	directory      string
-	encrypt, decrypt, generateHook, version bool
+	encrypt, decrypt, generateHook, version, install bool
 )
+
+const ShieldNotFound = "Shield is not globally callable for pre-commit hooks. Please ensure Shield is properly installed and added to your system's PATH, then try again. Refer to the Shield README, Downloading and Installing Shield."
+
+func checkShieldInstallation() bool {
+	_, err := exec.LookPath("shield")
+	return err == nil
+}
+
+func installShield() error {
+	currentPath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("error finding current executable: %v", err)
+	}
+
+	var targetPath string
+	switch runtime.GOOS {
+	case "windows":
+		targetPath = os.ExpandEnv(ShieldWindowsPath)
+	case "darwin":
+		targetPath = ShieldMacPath
+	default: // Linux
+		targetPath = ShieldLinuxPath
+	}
+
+	// Ensure the directory exists
+	dir := filepath.Dir(targetPath)
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("error creating directory: %v", err)
+		}
+	}
+
+	// Attempt to copy the current executable to the target path
+	input, err := os.ReadFile(currentPath)
+	if err != nil {
+		return fmt.Errorf("error reading current executable: %v", err)
+	}
+
+	err = os.WriteFile(targetPath, input, 0755)
+	if err != nil {
+		return fmt.Errorf("error writing to target path: %v", err)
+	}
+
+	return nil
+}
+
 
 func colorPrint(color string, text string) {
 	fmt.Println(string(color), text, string(Reset))
@@ -53,6 +106,7 @@ func init() {
 	flag.BoolVar(&decrypt, "d", false, "Decrypt files")
 	flag.BoolVar(&generateHook, "g", false, "Generate Git pre-commit hook")
 	flag.BoolVar(&version, "version", false, "Print version information")
+	flag.BoolVar(&install, "install", false, "Install Shield. Copies current binary to local user PATH")
 	flag.Usage = func() {
 		fmt.Println("Usage: shield [OPTION]...")
 		fmt.Println("Available options:")
@@ -63,15 +117,32 @@ func init() {
 func main() {
 	flag.Parse()
 
-	if directory != "." {
-		colorPrint(Green, fmt.Sprintf("Operating on directory: %s", directory))
+	if install {
+			err := installShield()
+			if err != nil {
+					fmt.Printf("Installation failed: %v\n", err)
+					os.Exit(1)
+			}
+			fmt.Println("Installation successful!")
+			os.Exit(0)
 	}
+
+	if !checkShieldInstallation() {
+		colorPrint(Red, ShieldNotFound)
+		os.Exit(1)
+	}
+	
 
 	// Resolve the directory to an absolute path
 	absDirectory, err := filepath.Abs(directory)
 	if err != nil {
 		log.Fatalf("Failed to resolve directory to an absolute path: %v\n", err)
 	}
+
+	if directory != "." {
+		colorPrint(Green, fmt.Sprintf("Operating on directory: %s", absDirectory))
+	}
+
 	directory = absDirectory
 
 	EncryptionTag = "SHIELD[" + Encryption + "]:"
@@ -107,9 +178,112 @@ func main() {
 		colorPrint(Yellow, fmt.Sprintf("Author: %s", Author))
 		os.Exit(0)
 	}
-	if !encrypt && !decrypt && !generateHook && !version {
+	if !encrypt && !decrypt && !generateHook && !version && !install {
 		flag.PrintDefaults()
 		os.Exit(1)
+	}
+}
+
+func getPreCommitScript() string {
+	header := regexp.QuoteMeta("SHIELD[" + Encryption + "]:")
+	switch runtime.GOOS {
+	case "windows":
+		return `# PowerShell script
+$ErrorActionPreference = "Stop"
+
+try {
+	Get-Command shield.exe -ErrorAction Stop | Out-Null
+} catch {
+	Write-Host "` + ShieldNotFound + `"
+	exit 1
+}
+
+$GLOB_PATTERNS = Get-Content .shield
+$OMIT_PATTERNS = Get-Content .shieldignore
+
+$files_to_encrypt = @()
+foreach($FILE_PATH in (git diff --cached --name-only)) {
+		if(Test-Path $FILE_PATH) {
+				foreach($glob in $GLOB_PATTERNS) {
+						if($FILE_PATH -like $glob) {
+								foreach($omit in $OMIT_PATTERNS) {
+										if($FILE_PATH -like $omit) {
+												continue
+										}
+								}
+								if(!(Get-Content $FILE_PATH | Select-String '` + header + `')) {
+									Write-Host "ERROR: The file $FILE_PATH is not encrypted."
+									$files_to_encrypt += $FILE_PATH
+								}
+						}
+				}
+		}
+}
+
+if($files_to_encrypt.Count -ne 0) {
+		Write-Host "Some files were not encrypted. Running encryption now..."
+		shield.exe -e
+		foreach($file in $files_to_encrypt) {
+				git add $file
+		}
+		Write-Host "Files have been encrypted and added to the commit. Please re-run the commit command."
+		exit 1
+}
+
+exit 0
+`
+	default:
+		return `#!/bin/bash
+set -e
+shopt -s globstar
+
+if ! command -v shield &> /dev/null; then
+		echo "` + ShieldNotFound + `"
+		exit 1
+fi
+
+GLOB_PATTERNS=()
+while IFS= read -r line; do
+		GLOB_PATTERNS+=("$line")
+done < .shield
+
+OMIT_PATTERNS=()
+while IFS= read -r line; do
+		OMIT_PATTERNS+=("$line")
+done < .shieldignore
+
+files_to_encrypt=()
+for FILE_PATH in $(git diff --cached --name-only); do
+		if [[ -e $FILE_PATH ]]; then
+				for glob in "${GLOB_PATTERNS[@]}"; do
+						if [[ $FILE_PATH == $glob ]]; then
+								for omit in "${OMIT_PATTERNS[@]}"; do
+										if [[ $FILE_PATH == $omit ]]; then
+												continue 2
+										fi
+								done
+
+								if ! head -n 1 "$FILE_PATH" | grep -q "` + header + `"; then
+									echo "ERROR: The file $FILE_PATH is not encrypted."
+									files_to_encrypt+=("$FILE_PATH")
+								fi
+						fi
+				done
+		fi
+done
+
+if [ ${#files_to_encrypt[@]} -ne 0 ]; then
+		echo "Some files were not encrypted. Running encryption now..."
+		shield -e
+		for file in "${files_to_encrypt[@]}"; do
+				git add "$file"
+		done
+		echo "Files have been encrypted and added to the commit. Please re-run the commit command."
+		exit 1
+fi
+
+exit 0
+`
 	}
 }
 
@@ -118,60 +292,16 @@ func generatePreCommitHook() {
 
 	// Remove the existing pre-commit hook file if it exists
     if err := os.Remove(preCommitHookPath); err != nil && !os.IsNotExist(err) {
-			colorPrint(Red, fmt.Sprintf("Error removing existing pre-commit hook: %s", err))
-			os.Exit(1)
+		colorPrint(Red, fmt.Sprintf("Error removing existing pre-commit hook: %s", err))
+		os.Exit(1)
 	}
 
-	preCommitHookScript := `#!/bin/bash
-set -e
-shopt -s globstar
+	preCommitHookScript := getPreCommitScript()
 
-GLOB_PATTERNS=()
-while IFS= read -r line; do
-  GLOB_PATTERNS+=("$line")
-done < .shield
-
-OMIT_PATTERNS=()
-while IFS= read -r line; do
-  OMIT_PATTERNS+=("$line")
-done < .shieldignore
-
-files_to_encrypt=()
-for FILE_PATH in $(git diff --cached --name-only); do
-  if [[ -e $FILE_PATH ]]; then
-    for glob in "${GLOB_PATTERNS[@]}"; do
-      if [[ $FILE_PATH == $glob ]]; then
-        for omit in "${OMIT_PATTERNS[@]}"; do
-          if [[ $FILE_PATH == $omit ]]; then
-            continue 2
-          fi
-        done
-
-        if ! file "$FILE_PATH" | grep -q 'data'; then
-          echo "ERROR: The file $FILE_PATH is not encrypted."
-          files_to_encrypt+=("$FILE_PATH")
-        fi
-      fi
-    done
-  fi
-done
-
-if [ ${#files_to_encrypt[@]} -ne 0 ]; then
-  echo "Some files were not encrypted. Running encryption now..."
-  ./shield -e
-  for file in "${files_to_encrypt[@]}"; do
-    git add "$file"
-  done
-  echo "Files have been encrypted and added to the commit. Please re-run the commit command."
-  exit 1
-fi
-
-exit 0
-`
 	err := os.WriteFile(preCommitHookPath, []byte(preCommitHookScript), 0755)
 	if err != nil {
-			colorPrint(Red, fmt.Sprintf("Error writing pre-commit hook: %s", err))
-			os.Exit(1)
+		colorPrint(Red, fmt.Sprintf("Error writing pre-commit hook: %s", err))
+		os.Exit(1)
 	}
 	colorPrint(Green, "Git pre-commit hook successfully generated!")
 }
