@@ -2,14 +2,11 @@
 ## [Unreleased]
 
 
-<a name="0.0.13"></a>
-## [0.0.13] - 2023-07-24
+<a name="0.0.14"></a>
+## [0.0.14] - 2023-07-25
 ### Bumped
-- Bumped version to 0.0.13
-
-### Test
-- Test add secret
+- Bumped version to 0.0.14
 
 
-[Unreleased]: https://path-gitlab.med.umich.edu/path-webteam/shield/compare/0.0.13...HEAD
-[0.0.13]: https://path-gitlab.med.umich.edu/path-webteam/shield/compare/0.0.12...0.0.13
+[Unreleased]: https://path-gitlab.med.umich.edu/path-webteam/shield/compare/0.0.14...HEAD
+[0.0.14]: https://path-gitlab.med.umich.edu/path-webteam/shield/compare/0.0.13...0.0.14
