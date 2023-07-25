@@ -46,7 +46,7 @@ const (
 )
 
 var (
-	directory      string
+	directory, passwordFile      string
 	encrypt, decrypt, generateHook, version, install bool
 )
 
@@ -107,6 +107,7 @@ func init() {
 	flag.BoolVar(&generateHook, "g", false, "Generate Git pre-commit hook")
 	flag.BoolVar(&version, "version", false, "Print version information")
 	flag.BoolVar(&install, "install", false, "Install Shield. Copies current binary to local user PATH")
+	flag.StringVar(&passwordFile, "passwordFile", "", "Specify the password location (default: ~/.ssh/vault)")
 	flag.Usage = func() {
 		fmt.Println("Usage: shield [OPTION]...")
 		fmt.Println("Available options:")
@@ -157,7 +158,11 @@ func main() {
 		home = usr.HomeDir
 	}
 
-	VaultPasswordFile = filepath.Join(home, ".ssh", "vault")
+	if passwordFile == "" {
+		VaultPasswordFile = filepath.Join(home, ".ssh", "vault")
+} else {
+		VaultPasswordFile = passwordFile
+}
 
 	if encrypt {
 		colorPrint(Green, "Encrypting files...")
