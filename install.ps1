@@ -7,13 +7,25 @@ $repo = "shield"
 $binaryName = "shield"
 
 if ($version -eq "latest") {
-    $version = Invoke-RestMethod -Uri "https://api.github.com/repos/$username/$repo/releases/latest" | Select-Object -ExpandProperty tag_name
+    try {
+        $version = Invoke-RestMethod -Uri "https://api.github.com/repos/$username/$repo/releases/latest" | Select-Object -ExpandProperty tag_name
+    }
+    catch {
+        Write-Host "Unable to fetch the latest version number."
+        exit 1
+    }
 }
 
-$url = "https://github.com/$username/$repo/releases/download/$version/$binaryName-$version-windows-amd64.exe"
-$output = "$HOME/$binaryName.exe"
+$url = "https://github.com/$username/$repo/releases/download/$version/$binaryName-$version-windows-amd64"
+$output = "C:\Windows\System32\$binaryName.exe"
 
 Write-Host "Downloading $binaryName..."
-Invoke-WebRequest -Uri $url -OutFile $output
-
-Write-Host "$binaryName downloaded successfully!"
+try {
+    Invoke-WebRequest -Uri $url -OutFile $output
+    Write-Host "$binaryName downloaded successfully!"
+}
+catch {
+    Write-Host "Failed to download $binaryName."
+    Write-Host $_.Exception.Message
+    exit 1
+}

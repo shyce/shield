@@ -26,12 +26,14 @@ Replace `<version>` with the version number that you want to install.
 On Windows, open a PowerShell window and run the following command:
 
 ```powershell
+Set-ExecutionPolicy RemoteSigned
 iwr -useb https://raw.githubusercontent.com/shyce/shield/main/install.ps1 | iex
 ```
 
 Optionally, you can specify a particular version to install like this:
 
 ```powershell
+Set-ExecutionPolicy RemoteSigned
 iwr -useb https://raw.githubusercontent.com/shyce/shield/main/install.ps1 | iex -v <version>
 ```
 Replace `<version>` with the version number that you want to install.

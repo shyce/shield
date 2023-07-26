@@ -40,13 +40,13 @@ var (
 )
 
 const (
-    ShieldLinuxPath   = "/usr/local/bin/shield"
-    ShieldWindowsPath = `%USERPROFILE%\AppData\Local\Programs\Shield\shield.exe`
-    ShieldMacPath     = "/usr/local/bin/shield"
+	ShieldLinuxPath   = "/usr/local/bin/shield"
+	ShieldWindowsPath = `C:\Windows\System32\shield.exe`
+	ShieldMacPath     = "/usr/local/bin/shield"
 )
 
 var (
-	directory, passwordFile      string
+	directory, passwordFile                          string
 	encrypt, decrypt, generateHook, version, install bool
 )
 
@@ -66,7 +66,7 @@ func installShield() error {
 	var targetPath string
 	switch runtime.GOOS {
 	case "windows":
-		targetPath = os.ExpandEnv(ShieldWindowsPath)
+		targetPath = ShieldWindowsPath
 	case "darwin":
 		targetPath = ShieldMacPath
 	default: // Linux
@@ -95,7 +95,6 @@ func installShield() error {
 	return nil
 }
 
-
 func colorPrint(color string, text string) {
 	fmt.Println(string(color), text, string(Reset))
 }
@@ -115,26 +114,76 @@ func init() {
 	}
 }
 
+func handleInstall() {
+	err := installShield()
+	if err != nil {
+		log.Fatalf("Installation failed: %v\n", err)
+	}
+	fmt.Println("Installation successful!")
+	os.Exit(0)
+}
+
+func handleEncryption() {
+	colorPrint(Green, "Encrypting files...")
+	encryptFiles()
+}
+
+func handleDecryption() {
+	colorPrint(Yellow, "Decrypting files...")
+	decryptFiles()
+}
+
+func handleGenerateHook() {
+	colorPrint(Magenta, "Generating Git pre-commit hook...")
+	generatePreCommitHook()
+}
+
+func handleVersion() {
+	colorPrint(Cyan, "Shield Encryption:")
+	colorPrint(Blue, fmt.Sprintf("Version: %s", Version))
+	colorPrint(Magenta, fmt.Sprintf("Encryption Version: %s", Encryption))
+	colorPrint(Yellow, fmt.Sprintf("Author: %s", Author))
+	os.Exit(0)
+}
+
+func handleDefault() {
+	flag.PrintDefaults()
+	os.Exit(1)
+}
+
+func getVaultPasswordFile() string {
+	home := getHomeDirectory()
+
+	if passwordFile == "" {
+		return filepath.Join(home, ".ssh", "vault")
+	}
+	return passwordFile
+}
+
+func getHomeDirectory() string {
+	home := os.Getenv("HOME")
+	if home == "" {
+		usr, err := user.Current()
+		if err != nil {
+			colorPrint(Red, fmt.Sprintf("Cannot get current user: %v", err))
+		}
+		home = usr.HomeDir
+	}
+	return home
+}
+
 func main() {
 	flag.Parse()
 
 	if install {
-			err := installShield()
-			if err != nil {
-					fmt.Printf("Installation failed: %v\n", err)
-					os.Exit(1)
-			}
-			fmt.Println("Installation successful!")
-			os.Exit(0)
+		handleInstall()
 	}
 
 	if !checkShieldInstallation() {
 		colorPrint(Red, ShieldNotFound)
 		os.Exit(1)
 	}
-	
 
-	// Resolve the directory to an absolute path
 	absDirectory, err := filepath.Abs(directory)
 	if err != nil {
 		log.Fatalf("Failed to resolve directory to an absolute path: %v\n", err)
@@ -149,43 +198,26 @@ func main() {
 	EncryptionTag = "SHIELD[" + Encryption + "]:"
 	EncryptionTagBytes = len(EncryptionTag)
 
-	home := os.Getenv("HOME")
-	if home == "" {
-		usr, err := user.Current()
-		if err != nil {
-			colorPrint(Red, fmt.Sprintf("Cannot get current user: %v", err))
-		}
-		home = usr.HomeDir
-	}
-
-	if passwordFile == "" {
-		VaultPasswordFile = filepath.Join(home, ".ssh", "vault")
-} else {
-		VaultPasswordFile = passwordFile
-}
+	VaultPasswordFile = getVaultPasswordFile()
 
 	if encrypt {
-		colorPrint(Green, "Encrypting files...")
-		encryptFiles()
+		handleEncryption()
 	}
+
 	if decrypt {
-		colorPrint(Yellow, "Decrypting files...")
-		decryptFiles()
+		handleDecryption()
 	}
+
 	if generateHook {
-		colorPrint(Magenta, "Generating Git pre-commit hook...")
-		generatePreCommitHook()
+		handleGenerateHook()
 	}
+
 	if version {
-		colorPrint(Cyan, "Shield Encryption:")
-		colorPrint(Blue, fmt.Sprintf("Version: %s", Version))
-		colorPrint(Magenta, fmt.Sprintf("Encryption Version: %s", Encryption))
-		colorPrint(Yellow, fmt.Sprintf("Author: %s", Author))
-		os.Exit(0)
+		handleVersion()
 	}
+
 	if !encrypt && !decrypt && !generateHook && !version && !install {
-		flag.PrintDefaults()
-		os.Exit(1)
+		handleDefault()
 	}
 }
 
@@ -193,42 +225,59 @@ func getPreCommitScript() string {
 	header := regexp.QuoteMeta("SHIELD[" + Encryption + "]:")
 	switch runtime.GOOS {
 	case "windows":
-		return `# PowerShell script
+		return `#!/usr/bin/env powershell
+
+#Requires -Version 5.0
 $ErrorActionPreference = "Stop"
 
-try {
-	Get-Command shield.exe -ErrorAction Stop | Out-Null
-} catch {
-	Write-Host "` + ShieldNotFound + `"
-	exit 1
+function Convert-GlobToRegex {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$Glob
+    )
+
+    $Glob = [Regex]::Escape($Glob)  # Escape any regex special characters
+    $Glob = $Glob -replace '\\\*\\\*', '.*'  # Replace ** with .*
+    $Glob = $Glob -replace '\\\*', '[^/]*'  # Replace * with [^/]*
+    $Glob = "^$Glob$"  # Match start and end of string
+
+    return $Glob
 }
 
-$GLOB_PATTERNS = Get-Content .shield
-$OMIT_PATTERNS = Get-Content .shieldignore
+if (!(Get-Command shield -ErrorAction SilentlyContinue)) {
+		Write-Host "Shield is not globally callable for pre-commit hooks. Please ensure Shield is properly installed and added to your system's PATH, then try again. Refer to the Shield README, Downloading and Installing Shield."
+		exit 1
+}
+
+$GLOB_PATTERNS = Get-Content .shield | ForEach-Object { Convert-GlobToRegex $_ }
+$OMIT_PATTERNS = Get-Content .shieldignore | ForEach-Object { Convert-GlobToRegex $_ }
 
 $files_to_encrypt = @()
-foreach($FILE_PATH in (git diff --cached --name-only)) {
-		if(Test-Path $FILE_PATH) {
-				foreach($glob in $GLOB_PATTERNS) {
-						if($FILE_PATH -like $glob) {
-								foreach($omit in $OMIT_PATTERNS) {
-										if($FILE_PATH -like $omit) {
+$git_files = git diff --cached --name-only | ForEach-Object { $_.ToString().Trim() }
+
+foreach ($FILE_PATH in $git_files) {
+		if (Test-Path $FILE_PATH) {
+				foreach ($glob in $GLOB_PATTERNS) {
+						if ($FILE_PATH -match $glob) {
+								foreach ($omit in $OMIT_PATTERNS) {
+										if ($FILE_PATH -match $omit) {
 												continue
 										}
 								}
-								if(!(Get-Content $FILE_PATH | Select-String '` + header + `')) {
-									Write-Host "ERROR: The file $FILE_PATH is not encrypted."
-									$files_to_encrypt += $FILE_PATH
+
+								if (!(Select-String -Path $FILE_PATH -Pattern "` + header + `" -Quiet)) {
+										Write-Host "ERROR: The file $FILE_PATH is not encrypted."
+										$files_to_encrypt += $FILE_PATH
 								}
 						}
 				}
 		}
 }
 
-if($files_to_encrypt.Count -ne 0) {
+if ($files_to_encrypt.Count -ne 0) {
 		Write-Host "Some files were not encrypted. Running encryption now..."
 		shield.exe -e
-		foreach($file in $files_to_encrypt) {
+		foreach ($file in $files_to_encrypt) {
 				git add $file
 		}
 		Write-Host "Files have been encrypted and added to the commit. Please re-run the commit command."
@@ -293,42 +342,81 @@ exit 0
 }
 
 func generatePreCommitHook() {
-	preCommitHookPath := filepath.Join(directory, ".git/hooks/pre-commit")
-
-	// Remove the existing pre-commit hook file if it exists
-    if err := os.Remove(preCommitHookPath); err != nil && !os.IsNotExist(err) {
-		colorPrint(Red, fmt.Sprintf("Error removing existing pre-commit hook: %s", err))
-		os.Exit(1)
-	}
-
 	preCommitHookScript := getPreCommitScript()
 
-	err := os.WriteFile(preCommitHookPath, []byte(preCommitHookScript), 0755)
-	if err != nil {
-		colorPrint(Red, fmt.Sprintf("Error writing pre-commit hook: %s", err))
-		os.Exit(1)
+	if runtime.GOOS == "windows" {
+		// Windows needs both pre-commit and pre-commit.ps1
+
+		preCommitHookPath := filepath.Join(directory, ".git/hooks/pre-commit")
+		preCommitHookPSPath := filepath.Join(directory, ".git/hooks/pre-commit.ps1")
+
+		// Remove the existing pre-commit hook file if it exists
+		if err := os.Remove(preCommitHookPath); err != nil && !os.IsNotExist(err) {
+			colorPrint(Red, fmt.Sprintf("Error removing existing pre-commit hook: %s", err))
+			os.Exit(1)
+		}
+
+		// Remove the existing pre-commit.ps1 hook file if it exists
+		if err := os.Remove(preCommitHookPSPath); err != nil && !os.IsNotExist(err) {
+			colorPrint(Red, fmt.Sprintf("Error removing existing pre-commit.ps1 hook: %s", err))
+			os.Exit(1)
+		}
+
+		// Write pre-commit.ps1 hook
+		err := os.WriteFile(preCommitHookPSPath, []byte(preCommitHookScript), 0755)
+		if err != nil {
+			colorPrint(Red, fmt.Sprintf("Error writing pre-commit.ps1 hook: %s", err))
+			os.Exit(1)
+		}
+		colorPrint(Green, "Git pre-commit.ps1 hook successfully generated!")
+
+		// Write pre-commit hook that calls pre-commit.ps1
+		preCommitHook := `#!/bin/sh
+powershell.exe -ExecutionPolicy Bypass -File .git/hooks/pre-commit.ps1`
+
+		err = os.WriteFile(preCommitHookPath, []byte(preCommitHook), 0755)
+		if err != nil {
+			colorPrint(Red, fmt.Sprintf("Error writing pre-commit hook: %s", err))
+			os.Exit(1)
+		}
+		colorPrint(Green, "Git pre-commit hook successfully generated!")
+
+	} else {
+		preCommitHookPath := filepath.Join(directory, ".git/hooks/pre-commit")
+
+		// Remove the existing pre-commit hook file if it exists
+		if err := os.Remove(preCommitHookPath); err != nil && !os.IsNotExist(err) {
+			colorPrint(Red, fmt.Sprintf("Error removing existing pre-commit hook: %s", err))
+			os.Exit(1)
+		}
+
+		err := os.WriteFile(preCommitHookPath, []byte(preCommitHookScript), 0755)
+		if err != nil {
+			colorPrint(Red, fmt.Sprintf("Error writing pre-commit hook: %s", err))
+			os.Exit(1)
+		}
+		colorPrint(Green, "Git pre-commit hook successfully generated!")
 	}
-	colorPrint(Green, "Git pre-commit hook successfully generated!")
 }
 
 func readPatternsFromFile(file string) ([]string, error) {
 	file = filepath.Join(directory, file)
 	f, err := os.Open(file)
 	if err != nil {
-			colorPrint(Red, fmt.Sprintf("Error opening file: %s", err))
-			return nil, err
+		colorPrint(Red, fmt.Sprintf("Error opening file: %s", err))
+		return nil, err
 	}
 	defer f.Close()
 
 	var patterns []string
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
-			patterns = append(patterns, scanner.Text())
+		patterns = append(patterns, scanner.Text())
 	}
 
 	if scanner.Err() != nil {
-			colorPrint(Red, fmt.Sprintf("Error reading file: %s", scanner.Err()))
-			return nil, scanner.Err()
+		colorPrint(Red, fmt.Sprintf("Error reading file: %s", scanner.Err()))
+		return nil, scanner.Err()
 	}
 
 	return patterns, nil
@@ -353,25 +441,25 @@ func processFiles(files []string, actionFunc func(string), wg *sync.WaitGroup, s
 func encryptFiles() {
 	shieldPatterns, err := readPatternsFromFile(".shield")
 	if err != nil {
-			colorPrint(Red, "Error reading .shield file, please ensure it exists and is correctly formatted.")
-			os.Exit(1)
+		colorPrint(Red, "Error reading .shield file, please ensure it exists and is correctly formatted.")
+		os.Exit(1)
 	}
 
 	shieldIgnorePatterns, err := readPatternsFromFile(".shieldignore")
 	if err != nil {
-			colorPrint(Red, "Error reading .shieldignore file, please ensure it exists and is correctly formatted.")
-			os.Exit(1)
+		colorPrint(Red, "Error reading .shieldignore file, please ensure it exists and is correctly formatted.")
+		os.Exit(1)
 	}
 
 	fsys := os.DirFS(directory)
 	var filesToEncrypt []string
 	for _, pattern := range shieldPatterns {
-			colorPrint(Green, fmt.Sprintf("Looking for files matching pattern: %s", pattern))
-			matchingFiles, err := doublestar.Glob(fsys, pattern)
-			if err != nil {
-					colorPrint(Red, fmt.Sprintf("Error while matching glob pattern: %s", err))
-					os.Exit(1)
-			}
+		colorPrint(Green, fmt.Sprintf("Looking for files matching pattern: %s", pattern))
+		matchingFiles, err := doublestar.Glob(fsys, pattern)
+		if err != nil {
+			colorPrint(Red, fmt.Sprintf("Error while matching glob pattern: %s", err))
+			os.Exit(1)
+		}
 
 		for _, filePath := range matchingFiles {
 			isOmitted := false
@@ -402,25 +490,25 @@ func encryptFiles() {
 func decryptFiles() {
 	shieldPatterns, err := readPatternsFromFile(".shield")
 	if err != nil {
-			colorPrint(Red, "Error reading .shield file, please ensure it exists and is correctly formatted.")
-			os.Exit(1)
+		colorPrint(Red, "Error reading .shield file, please ensure it exists and is correctly formatted.")
+		os.Exit(1)
 	}
 
 	shieldIgnorePatterns, err := readPatternsFromFile(".shieldignore")
 	if err != nil {
-			colorPrint(Red, "Error reading .shieldignore file, please ensure it exists and is correctly formatted.")
-			os.Exit(1)
+		colorPrint(Red, "Error reading .shieldignore file, please ensure it exists and is correctly formatted.")
+		os.Exit(1)
 	}
 
 	fsys := os.DirFS(directory)
 	var filesToDecrypt []string
 	for _, pattern := range shieldPatterns {
-			colorPrint(Green, fmt.Sprintf("Looking for files matching pattern: %s", pattern))
-			matchingFiles, err := doublestar.Glob(fsys, pattern)
-			if err != nil {
-					colorPrint(Red, fmt.Sprintf("Error while matching glob pattern: %s", err))
-					os.Exit(1)
-			}
+		colorPrint(Green, fmt.Sprintf("Looking for files matching pattern: %s", pattern))
+		matchingFiles, err := doublestar.Glob(fsys, pattern)
+		if err != nil {
+			colorPrint(Red, fmt.Sprintf("Error while matching glob pattern: %s", err))
+			os.Exit(1)
+		}
 
 		for _, filePath := range matchingFiles {
 			isOmitted := false
@@ -457,7 +545,7 @@ func encryptFile(path string) {
 	cmd.Stdout = &out
 	err := cmd.Run()
 	if err != nil {
-			colorPrint(Red, fmt.Sprintf("Failed to encrypt file: %s", err))
+		colorPrint(Red, fmt.Sprintf("Failed to encrypt file: %s", err))
 	} else {
 		err = addEncryptionTag(path + ".enc") // add tag to encrypted file
 		if err != nil {
@@ -490,10 +578,10 @@ func decryptFile(path string) {
 		cmd.Stdout = &out
 		err = cmd.Run()
 		if err != nil {
-				colorPrint(Red, fmt.Sprintf("Failed to decrypt file: %s", err))
-				if err := addEncryptionTag(path); err != nil { // add tag back if decryption failed
-					colorPrint(Red, fmt.Sprintf("Failed to add encryption tag: %s", err))
-				}
+			colorPrint(Red, fmt.Sprintf("Failed to decrypt file: %s", err))
+			if err := addEncryptionTag(path); err != nil { // add tag back if decryption failed
+				colorPrint(Red, fmt.Sprintf("Failed to add encryption tag: %s", err))
+			}
 		} else {
 			colorPrint(Green, fmt.Sprintf("Decrypted file: %s", path))
 			if err := os.Remove(path); err != nil {
