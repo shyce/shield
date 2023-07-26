@@ -10,8 +10,8 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
-	"regexp"
 	"runtime"
+	"strings"
 	"sync"
 
 	"github.com/bmatcuk/doublestar/v4"
@@ -46,8 +46,8 @@ const (
 )
 
 var (
-	directory, passwordFile                          string
-	encrypt, decrypt, generateHook, version, install bool
+	directory, passwordFile                          			 string
+	encrypt, decrypt, generateHook, scan, version, install bool
 )
 
 const ShieldNotFound = "Shield is not globally callable for pre-commit hooks. Please ensure Shield is properly installed and added to your system's PATH, then try again. Refer to the Shield README, Downloading and Installing Shield."
@@ -95,6 +95,90 @@ func installShield() error {
 	return nil
 }
 
+func getGitDiffFiles() ([]string, error) {
+	out, err := exec.Command("git", "diff", "--cached", "--name-only").Output()
+	if err != nil {
+		return nil, err
+	}
+
+	files := strings.Split(string(out), "\n")
+	return files, nil
+}
+
+func addFileToGit(file string) {
+	_, err := exec.Command("git", "add", file).Output()
+	if err != nil {
+		colorPrint(Red, fmt.Sprintf("Error adding file to git: %s", err))
+		os.Exit(1)
+	}
+}
+
+func scanGitDiff() {
+	shieldPatterns, err := readPatternsFromFile(".shield")
+	if err != nil {
+		colorPrint(Red, fmt.Sprintf("Error reading .shield file: %s", err))
+		os.Exit(1)
+	}
+
+	shieldIgnorePatterns, err := readPatternsFromFile(".shieldignore")
+	if err != nil {
+		colorPrint(Red, fmt.Sprintf("Error reading .shieldignore file: %s", err))
+		os.Exit(1)
+	}
+
+	gitFiles, err := getGitDiffFiles()
+	if err != nil {
+		colorPrint(Red, fmt.Sprintf("Error getting git diff files: %s", err))
+		os.Exit(1)
+	}
+
+	filesToEncrypt := []string{}
+	for _, file := range gitFiles {
+		if _, err := os.Stat(file); err == nil {
+			isOmitted := false
+			for _, omitPattern := range shieldIgnorePatterns {
+				matches, _ := doublestar.Match(omitPattern, file)
+				if matches {
+					isOmitted = true
+					break
+				}
+			}
+			if isOmitted {
+				continue
+			}
+
+			for _, glob := range shieldPatterns {
+				matched, _ := doublestar.Match(glob, file)
+				if matched {
+					encrypted, err := isFileEncrypted(file)
+					if err != nil {
+						colorPrint(Red, fmt.Sprintf("Error checking encryption status of file: %s", err))
+						os.Exit(1)
+					}
+
+					if !encrypted {
+						filesToEncrypt = append(filesToEncrypt, file)
+					}
+					break
+				}
+			}
+		}
+	}
+
+	if len(filesToEncrypt) > 0 {
+		colorPrint(Yellow, "Some files were not encrypted. Running encryption now...")
+		encryptFiles()
+
+		for _, file := range filesToEncrypt {
+			addFileToGit(file)
+		}
+		colorPrint(Green, "Files have been encrypted and added to the commit.")
+		os.Exit(0)
+	}
+	colorPrint(Green, "All sensitive files are encrypted.")
+	os.Exit(0)
+}
+
 func colorPrint(color string, text string) {
 	fmt.Println(string(color), text, string(Reset))
 }
@@ -104,6 +188,7 @@ func init() {
 	flag.BoolVar(&encrypt, "e", false, "Encrypt files")
 	flag.BoolVar(&decrypt, "d", false, "Decrypt files")
 	flag.BoolVar(&generateHook, "g", false, "Generate Git pre-commit hook")
+	flag.BoolVar(&scan, "scan", false, "Scan git-diff files for unencrypted files")
 	flag.BoolVar(&version, "version", false, "Print version information")
 	flag.BoolVar(&install, "install", false, "Install Shield. Copies current binary to local user PATH")
 	flag.StringVar(&passwordFile, "passwordFile", "", "Specify the password location (default: ~/.ssh/vault)")
@@ -136,6 +221,11 @@ func handleDecryption() {
 func handleGenerateHook() {
 	colorPrint(Magenta, "Generating Git pre-commit hook...")
 	generatePreCommitHook()
+}
+
+func handleScan() {
+	colorPrint(Blue, "Scanning git-diff files for unencrypted files...")
+	scanGitDiff()
 }
 
 func handleVersion() {
@@ -212,6 +302,10 @@ func main() {
 		handleGenerateHook()
 	}
 
+	if scan {
+		handleScan()
+	}
+
 	if version {
 		handleVersion()
 	}
@@ -222,120 +316,30 @@ func main() {
 }
 
 func getPreCommitScript() string {
-	header := regexp.QuoteMeta("SHIELD[" + Encryption + "]:")
 	switch runtime.GOOS {
 	case "windows":
 		return `#!/usr/bin/env powershell
-
 #Requires -Version 5.0
 $ErrorActionPreference = "Stop"
 
-function Convert-GlobToRegex {
-    param(
-        [Parameter(Mandatory=$true)]
-        [string]$Glob
-    )
-
-    $Glob = [Regex]::Escape($Glob)  # Escape any regex special characters
-    $Glob = $Glob -replace '\\\*\\\*', '.*'  # Replace ** with .*
-    $Glob = $Glob -replace '\\\*', '[^/]*'  # Replace * with [^/]*
-    $Glob = "^$Glob$"  # Match start and end of string
-
-    return $Glob
-}
-
 if (!(Get-Command shield -ErrorAction SilentlyContinue)) {
-		Write-Host "Shield is not globally callable for pre-commit hooks. Please ensure Shield is properly installed and added to your system's PATH, then try again. Refer to the Shield README, Downloading and Installing Shield."
-		exit 1
+	Write-Host "Shield is not globally callable for pre-commit hooks. Please ensure Shield is properly installed and added to your system's PATH, then try again. Refer to the Shield README, Downloading and Installing Shield."
+	exit 1
 }
 
-$GLOB_PATTERNS = Get-Content .shield | ForEach-Object { Convert-GlobToRegex $_ }
-$OMIT_PATTERNS = Get-Content .shieldignore | ForEach-Object { Convert-GlobToRegex $_ }
-
-$files_to_encrypt = @()
-$git_files = git diff --cached --name-only | ForEach-Object { $_.ToString().Trim() }
-
-foreach ($FILE_PATH in $git_files) {
-		if (Test-Path $FILE_PATH) {
-				foreach ($glob in $GLOB_PATTERNS) {
-						if ($FILE_PATH -match $glob) {
-								foreach ($omit in $OMIT_PATTERNS) {
-										if ($FILE_PATH -match $omit) {
-												continue
-										}
-								}
-
-								if (!(Select-String -Path $FILE_PATH -Pattern "` + header + `" -Quiet)) {
-										Write-Host "ERROR: The file $FILE_PATH is not encrypted."
-										$files_to_encrypt += $FILE_PATH
-								}
-						}
-				}
-		}
-}
-
-if ($files_to_encrypt.Count -ne 0) {
-		Write-Host "Some files were not encrypted. Running encryption now..."
-		shield.exe -e
-		foreach ($file in $files_to_encrypt) {
-				git add $file
-		}
-		Write-Host "Files have been encrypted and added to the commit. Please re-run the commit command."
-		exit 1
-}
-
+shield --scan
 exit 0
 `
 	default:
 		return `#!/bin/bash
 set -e
-shopt -s globstar
 
 if ! command -v shield &> /dev/null; then
-		echo "` + ShieldNotFound + `"
-		exit 1
+	echo "` + ShieldNotFound + `"
+	exit 1
 fi
 
-GLOB_PATTERNS=()
-while IFS= read -r line; do
-		GLOB_PATTERNS+=("$line")
-done < .shield
-
-OMIT_PATTERNS=()
-while IFS= read -r line; do
-		OMIT_PATTERNS+=("$line")
-done < .shieldignore
-
-files_to_encrypt=()
-for FILE_PATH in $(git diff --cached --name-only); do
-		if [[ -e $FILE_PATH ]]; then
-				for glob in "${GLOB_PATTERNS[@]}"; do
-						if [[ $FILE_PATH == $glob ]]; then
-								for omit in "${OMIT_PATTERNS[@]}"; do
-										if [[ $FILE_PATH == $omit ]]; then
-												continue 2
-										fi
-								done
-
-								if ! head -n 1 "$FILE_PATH" | grep -q "` + header + `"; then
-									echo "ERROR: The file $FILE_PATH is not encrypted."
-									files_to_encrypt+=("$FILE_PATH")
-								fi
-						fi
-				done
-		fi
-done
-
-if [ ${#files_to_encrypt[@]} -ne 0 ]; then
-		echo "Some files were not encrypted. Running encryption now..."
-		shield -e
-		for file in "${files_to_encrypt[@]}"; do
-				git add "$file"
-		done
-		echo "Files have been encrypted and added to the commit. Please re-run the commit command."
-		exit 1
-fi
-
+shield --scan
 exit 0
 `
 	}
