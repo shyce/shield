@@ -29,6 +29,10 @@ const (
 	Reset   = "\u001b[0m"
 )
 
+func colorPrint(color string, text string) {
+	fmt.Println(string(color), text, string(Reset))
+}
+
 var (
 	Author             string
 	Encryption         string
@@ -179,10 +183,6 @@ func scanGitDiff() {
 	os.Exit(0)
 }
 
-func colorPrint(color string, text string) {
-	fmt.Println(string(color), text, string(Reset))
-}
-
 func init() {
 	flag.StringVar(&directory, "v", ".", "directory to operate on")
 	flag.BoolVar(&encrypt, "e", false, "Encrypt files")
@@ -197,6 +197,28 @@ func init() {
 		fmt.Println("Available options:")
 		flag.PrintDefaults()
 	}
+}
+
+func SetDirectory(dir string) {
+	absDirectory, err := filepath.Abs(dir)
+	if err != nil {
+		log.Fatalf("Failed to resolve directory to an absolute path: %v\n", err)
+	}
+
+	if directory != "." {
+		colorPrint(Green, fmt.Sprintf("Operating on directory: %s", absDirectory))
+	}
+
+	directory = absDirectory
+}
+
+func SetEncryptionTag() {
+	EncryptionTag = "SHIELD[" + Encryption + "]:"
+	EncryptionTagBytes = len(EncryptionTag)
+}
+
+func SetPasswordFile(file string) {
+	VaultPasswordFile = file
 }
 
 func handleInstall() {
@@ -274,21 +296,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	absDirectory, err := filepath.Abs(directory)
-	if err != nil {
-		log.Fatalf("Failed to resolve directory to an absolute path: %v\n", err)
-	}
-
-	if directory != "." {
-		colorPrint(Green, fmt.Sprintf("Operating on directory: %s", absDirectory))
-	}
-
-	directory = absDirectory
-
-	EncryptionTag = "SHIELD[" + Encryption + "]:"
-	EncryptionTagBytes = len(EncryptionTag)
-
-	VaultPasswordFile = getVaultPasswordFile()
+	SetDirectory(directory)
+	SetEncryptionTag()
+	SetPasswordFile(getVaultPasswordFile())
 
 	if encrypt {
 		handleEncryption()

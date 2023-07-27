@@ -2,7 +2,18 @@
 
 Under the Apache-2.0 License, `Shield` is a utility for encrypting and decrypting files in your project. It uses AES-256 encryption via the `openssl` command line tool.
 
----
+## Table of Contents
+1. [Downloading and Installing Shield](#downloading-and-installing-shield)
+2. [Self-installation](#self-installation)
+3. [User Requirements](#user-requirements)
+4. [Setup](#setup)
+5. [Flags/Options](#flagsoptions)
+6. [Usage](#usage)
+7. [Running Shield with Docker](#running-shield-with-docker)
+8. [Developer Guide](#developer-guide)
+9. [Note](#note)
+10. [Warning](#warning)
+11. [Disclaimer](#disclaimer)
 
 ## Downloading and Installing Shield
 
@@ -54,6 +65,54 @@ After successful installation, you should be able to run Shield from any directo
 
 Please ensure you have the necessary permissions to write to the target directory. On Unix-based systems, you may need to prepend the command with `sudo` if you encounter permission issues.
 
+## User Requirements
+
+Shield relies on a few external tools to operate. These include:
+
+- [OpenSSL](https://www.openssl.org/source/): Required for AES-256 encryption and decryption. Please ensure it is installed and accessible in your system's PATH.
+  
+- [Git](https://git-scm.com/downloads) (optional): If you want to make use of Shield's Git integration features, such as the pre-commit hook, Git must be installed and accessible in your system's PATH.
+
+### OpenSSL Installation
+
+#### macOS
+
+```bash
+brew install openssl
+```
+
+#### Ubuntu/RHEL
+
+Ubuntu:
+```bash
+sudo apt-get install openssl
+```
+
+RHEL:
+```bash
+sudo yum install openssl
+```
+
+### Git Installation
+
+#### macOS
+
+```bash
+brew install git
+```
+
+#### Ubuntu/RHEL
+
+Ubuntu:
+```bash
+sudo apt-get install git
+```
+
+RHEL:
+```bash
+sudo yum install git
+```
+
 ## Setup
 
 1. Create a `~/.ssh/vault` file with a secure password and `chmod 600 ~/.ssh/vault`. This is used to encrypt and decrypt files in the repository and should be shared between developers of your project.
@@ -82,6 +141,49 @@ Please ensure you have the necessary permissions to write to the target director
 
 4. Generate a pre-commit hook in your project with `shield -g`
 
+## Flags/Options
+
+`Shield` accepts a number of options that can be passed at the command line:
+
+- `-v <path>`: Specify the directory to operate on. Default is the current directory. 
+
+  Example: `shield -v /path/to/my/project`
+  
+- `-e`: Encrypt files. This will encrypt all files that match the patterns in your `.shield` file and do not match any patterns in your `.shieldignore` file.
+  
+  Example: `shield -e`
+
+- `-d`: Decrypt files. This will decrypt all encrypted files that match the patterns in your `.shield` file and do not match any patterns in your `.shieldignore` file.
+
+  Example: `shield -d`
+
+- `-g`: Generate Git pre-commit hook. After running this command, every time you try to commit, the hook will check for unencrypted files and encrypt them.
+
+  Example: `shield -g`
+
+- `--scan`: Scan git-diff files for unencrypted files. This flag will perform a scan operation that identifies unencrypted files in your git-diff.
+
+  Example: `shield --scan`
+
+- `--version`: Print version information. This flag will output the current version of the `shield` tool you are using.
+
+  Example: `shield --version`
+
+- `--install`: Install Shield. This will copy the current binary to your local user `PATH` which allows you to use the `shield` command anywhere on your system.
+
+  Example: `shield --install`
+
+- `--passwordFile <path>`: Specify the password location. Default location is `~/.ssh/vault`. 
+
+  Example: `shield --passwordFile /path/to/my/password/file`
+
+Use these flags in combination to perform the tasks you need. For instance, to encrypt files in a specific directory, you might run `shield -e -v /path/to/my/project`.
+
+For displaying the usage details, simply run `shield` without any flags. The tool will provide a brief explanation about each flag.
+
+```bash
+shield
+```
 ## Usage
 
 - To **encrypt files**, run the command: `shield -e`. This will encrypt all files that match the patterns in your `.shield` file and do not match any patterns in your `.shieldignore` file.
