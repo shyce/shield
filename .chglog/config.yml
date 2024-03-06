@@ -2,7 +2,7 @@ style: gitlab
 template: CHANGELOG.tpl.md
 info:
   title: CHANGELOG
-  repository_url: https://path-gitlab.med.umich.edu/path-webteam/shield
+  repository_url: https://github.com/shyce/shield
 options:
   commits:
     # filters:
