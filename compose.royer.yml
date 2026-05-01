@@ -1,0 +1,30 @@
+# Layered onto compose.yml when royer.app's backend launches a preview.
+# Local `docker compose up` ignores this file; the backend stacks it with -f.
+#
+# Hardening:
+#   read_only           — root fs is immutable; all writes go to /tmp tmpfs
+#   tmpfs /tmp 64M      — bounded ephemeral scratch for session dirs
+#   cap_drop ALL        — no Linux capabilities
+#   no-new-privileges   — execve() can never escalate
+#   pids_limit 32       — bounds fork/exec
+#   mem_limit 128m      — bounds RSS
+#   read_only template  — visitor can't write into the source-of-truth
+#
+# The image already has no shell, no coreutils, no package manager, and
+# no network tools (see Dockerfile.sandbox). The web-ui binary is the
+# only listener and the only program that execs anything.
+
+services:
+  web:
+    ports: !reset []
+    labels:
+      royer.entrypoint: "true"
+      royer.port: "7681"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=0700,uid=1000,gid=1000
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 32
+    mem_limit: 128m

@@ -1,0 +1,112 @@
+# Sandbox image for royer.app. Final stage is FROM scratch — only the
+# binaries we explicitly copy ship. NOT the production CLI image; see
+# Dockerfile for that.
+#
+# No busybox. busybox is a multi-call binary, so even when only `ls`
+# and `cat` symlinks are exposed, calling busybox directly dispatches
+# to any applet (ping, wget, nc, etc.). Instead this image ships dash
+# as /bin/sh and individual GNU coreutils binaries — none of those are
+# multi-call.
+#
+# Visitor-callable surface:
+#   /usr/local/bin/shield, /usr/bin/openssl
+#   /bin/sh (dash), /bin/{ls,cat,head,tail,mv,rm,mkdir,cp,mktemp,clear}
+#
+# Not present: bash, curl, wget, nc, ssh, git, python, perl, find, awk,
+# sed, busybox, ping, package manager. Read-only fs + tmpfs /tmp at
+# runtime (see compose.royer.yml).
+
+# Stage 1: shield, statically linked.
+FROM golang:1.20.1-alpine AS shield-builder
+WORKDIR /src
+RUN apk add --no-cache git
+COPY go.mod go.sum ./
+RUN go mod download
+COPY shield.go shield_test.go version.json ./
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags="-s -w -X 'main.Version=sandbox' -X 'main.Name=shield' -X 'main.Author=Brian Royer' -X 'main.Encryption=1.0'" \
+    -o /out/shield .
+
+# Stage 2: ttyd + its runtime libs, laid out for a flat COPY into scratch.
+FROM alpine:3.18 AS ttyd-source
+RUN apk add --no-cache ttyd
+RUN mkdir -p /pkg/usr/bin /pkg/usr/lib /pkg/lib && \
+    cp /usr/bin/ttyd                          /pkg/usr/bin/ && \
+    cp /lib/ld-musl-x86_64.so.1               /pkg/lib/     && \
+    cp /lib/libz.so.1                         /pkg/lib/     && \
+    cp /lib/libssl.so.3                       /pkg/lib/     && \
+    cp /lib/libcrypto.so.3                    /pkg/lib/     && \
+    cp /usr/lib/libwebsockets.so.19           /pkg/usr/lib/ && \
+    cp /usr/lib/libwebsockets-evlib_uv.so     /pkg/usr/lib/ && \
+    cp /usr/lib/libjson-c.so.5                /pkg/usr/lib/ && \
+    cp /usr/lib/libuv.so.1                    /pkg/usr/lib/
+
+# Stage 3: openssl binary (libs already covered by ttyd-source).
+FROM alpine:3.18 AS openssl-source
+RUN apk add --no-cache openssl
+RUN mkdir -p /pkg/usr/bin && cp /usr/bin/openssl /pkg/usr/bin/
+
+# Stage 4: dash + a curated set of GNU coreutils, from debian-slim.
+# Alpine's coreutils package only ships the binaries that aren't in
+# busybox; ls/cat/mv/rm/mkdir/cp/mktemp would still come from busybox
+# (multi-call) on alpine. Debian ships them as separate non-multi-call
+# binaries. None of these can be coerced into running ping/wget/nc.
+FROM debian:stable-slim AS shell-source
+RUN apt-get update -qq && apt-get install -y --no-install-recommends ncurses-bin ncurses-base >/dev/null
+RUN set -eux; mkdir -p /pkg/bin /pkg/usr/share/terminfo/x; \
+    cp /usr/bin/dash /pkg/bin/sh; \
+    for b in ls cat head tail mv rm mkdir cp mktemp clear; do \
+      cp "$(command -v $b)" /pkg/bin/; \
+    done; \
+    # Just the xterm family — ttyd advertises xterm-256color by default,
+    # and we want a dumb/vt100 fallback for completeness. ~30 KB total.
+    for t in xterm xterm-256color xterm-color vt100 dumb ansi linux; do \
+      first=$(echo "$t" | cut -c1); \
+      src="/usr/share/terminfo/$first/$t"; \
+      [ -f "$src" ] && { mkdir -p "/pkg/usr/share/terminfo/$first"; cp "$src" "/pkg/usr/share/terminfo/$first/"; }; \
+    done; \
+    # Auto-copy each binary's dynamic library deps, preserving paths.
+    for b in /pkg/bin/*; do \
+      ldd "$b" 2>/dev/null | awk '/=> \// {print $3} /^\t\//{print $1}' | while read -r lib; do \
+        if [ -f "$lib" ]; then \
+          mkdir -p "/pkg$(dirname "$lib")"; \
+          cp -L "$lib" "/pkg$lib"; \
+        fi; \
+      done; \
+    done
+
+# Stage 5: minimal /etc + /home/sandbox with the vault file in the
+# default location shield expects (~/.ssh/vault).
+FROM alpine:3.18 AS etc-source
+COPY sandbox/vault /tmp/vault
+RUN apk add --no-cache openssl && \
+    mkdir -p /pkg/etc/ssl /pkg/home/sandbox/.ssh && \
+    echo 'sandbox:x:1000:1000:sandbox:/home/sandbox:/bin/sh' > /pkg/etc/passwd && \
+    echo 'sandbox:x:1000:'                                   > /pkg/etc/group  && \
+    cp /etc/ssl/openssl.cnf  /pkg/etc/ssl/openssl.cnf       && \
+    cp /tmp/vault            /pkg/home/sandbox/.ssh/vault   && \
+    chmod 0600               /pkg/home/sandbox/.ssh/vault   && \
+    chown -R 1000:1000       /pkg/home/sandbox
+
+# Stage 6: scratch.
+FROM scratch
+COPY --from=ttyd-source    /pkg/      /
+COPY --from=openssl-source /pkg/      /
+COPY --from=shell-source   /pkg/      /
+COPY --from=etc-source     /pkg/      /
+COPY --from=shield-builder /out/shield /usr/local/bin/shield
+
+COPY sandbox/template /opt/shield-sandbox/template
+COPY sandbox/motd     /etc/motd
+COPY sandbox/start.sh /sandbox/start.sh
+
+ENV PATH=/usr/local/bin:/usr/bin:/bin
+ENV HOME=/home/sandbox
+USER 1000:1000
+WORKDIR /tmp
+EXPOSE 7681
+
+# ttyd execs `/bin/sh /sandbox/start.sh` on every WebSocket. (-W is
+# pre-1.7 syntax; ttyd 1.7+ is writable by default; -R would be
+# read-only.)
+CMD ["/usr/bin/ttyd", "-p", "7681", "/bin/sh", "/sandbox/start.sh"]

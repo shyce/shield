@@ -1,0 +1,19 @@
+==========================================================
+                    Shield Sandbox
+==========================================================
+This terminal has only: sh, shield, openssl, and a handful
+of read-only utilities (ls, cat, head, tail, mv, rm, mkdir,
+cp, mktemp, clear). No curl, no wget, no nc, no package
+manager. The container has no shell history, no writable
+home, and 30 minutes to live.
+
+  ls                see what's here
+  cat .shield       see the patterns
+  shield -e         encrypt files matching .shield
+  shield -d         decrypt them
+  shield --version  version info
+
+Vault password is at ~/.ssh/vault (already set up).
+This is a fresh copy of the template; closing this
+terminal wipes it.
+==========================================================

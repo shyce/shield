@@ -1,0 +1,3 @@
+secrets/*.txt
+**/*.pem
+config/*.secret
