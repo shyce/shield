@@ -1,0 +1,25 @@
+# shield — PROD stack
+#
+# The web-ui sandbox built from Dockerfile.sandbox is already the production
+# portfolio image: FROM scratch, statically compiled Go binary + ttyd + a
+# curated, multi-call-binary-free shell, hardened by compose.royer.yml at
+# runtime (read-only rootfs, tmpfs /tmp, cap_drop ALL, no-new-privileges,
+# pids/mem caps). No separate Dockerfile.prod is needed — Dockerfile.sandbox
+# is the prod build.
+#
+# Build:  docker compose -f compose.prod.yml build
+# Run:    docker compose -f compose.prod.yml up -d
+# Open:   http://localhost:7681
+
+name: shield-prod
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.sandbox
+    image: shield/web:prod
+    container_name: shield-web
+    restart: unless-stopped
+    ports:
+      - "7681:7681"
