@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 # Stage 1: Build
 FROM golang:1.20.1-alpine as builder
 
@@ -8,13 +9,16 @@ RUN apk add --no-cache git jq bash openssl
 
 # Copy and download dependencies
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
 # Copy source code
 COPY . .
 
 # Build
-RUN chmod +x build.sh && ./build.sh
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    chmod +x build.sh && ./build.sh
 
 # Stage 2: Run
 FROM alpine:3.18
