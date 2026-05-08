@@ -16,7 +16,7 @@
 
 services:
   web:
-    ports: !reset []
+    ports: !override ["30240:7681"]
     labels:
       royer.entrypoint: "true"
       royer.port: "7681"
