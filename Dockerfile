@@ -9,15 +9,14 @@ RUN apk add --no-cache git jq bash openssl
 
 # Copy and download dependencies
 COPY go.mod go.sum ./
-RUN --mount=type=cache,target=/go/pkg/mod \
+RUN \
     go mod download
 
 # Copy source code
 COPY . .
 
 # Build
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
+RUN \
     chmod +x build.sh && ./build.sh
 
 # Stage 2: Run
