@@ -15,10 +15,8 @@ name: shield-prod
 
 services:
   web:
-    build:
-      context: .
-      dockerfile: Dockerfile.sandbox
-    image: shield/web:prod
+    image: ghcr.io/shyce/shield:demo
+    pull_policy: always
     container_name: shield-web
     restart: unless-stopped
     ports:
